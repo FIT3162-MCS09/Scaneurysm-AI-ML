@@ -10,6 +10,7 @@ on:
       bucket:
         description: 'S3 Bucket for Model Artifacts'
         required: true
+        default: 'shap-model-artifacts-522814726499'
       instance_type:
         description: 'SageMaker Instance Type'
         required: true
