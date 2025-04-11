@@ -49,15 +49,23 @@ jobs:
       
       - name: Set AWS Account ID
         run: echo "AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}" >> $GITHUB_ENV
+        
+      # Create ECR repository if it doesn't exist
+      - name: Create ECR Repository
+        run: |
+          aws ecr describe-repositories --repository-names tensorflow-inference || aws ecr create-repository --repository-name tensorflow-inference
+        continue-on-error: true
       
+      # Login to Amazon ECR
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+      
+      # Build and push using docker CLI after ECR login
       - name: Build and push Docker image
-        uses: docker/build-push-action@v4.1.1
-        with:
-          context: ./model
-          push: true
-          tags: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ github.event.inputs.region }}.amazonaws.com/tensorflow-inference:latest
-          build-args: |
-            REGION=${{ github.event.inputs.region }}
+        run: |
+          docker build -t ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ github.event.inputs.region }}.amazonaws.com/tensorflow-inference:latest ./model
+          docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ github.event.inputs.region }}.amazonaws.com/tensorflow-inference:latest
       
       - name: Deploy to SageMaker
         id: deploy
@@ -71,8 +79,7 @@ jobs:
             --account ${{ env.AWS_ACCOUNT_ID }} \
             --role ${{ secrets.AWS_SAGEMAKER_ROLE_ARN }}
       
-      # Alternative approach: Skip artifact upload and just output the endpoint info
       - name: Display endpoint info
         run: |
           cat endpoint_info.json
-          echo "::set-output name=endpoint_info::$(cat endpoint_info.json)"
+          echo "ENDPOINT_NAME=$(cat endpoint_info.json | jq -r '.endpoint_name')" >> $GITHUB_OUTPUT
