@@ -1,6 +1,0 @@
-tensorflow==2.8.0
-shap==0.41.0
-numpy>=1.19.5
-pillow>=8.0.0
-scipy>=1.7.0
-boto3>=1.24.0
