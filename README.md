@@ -1,62 +1,120 @@
-# SHAP ResNet-50 SageMaker Endpoint
+# Scaneurysm AI - Brain CT Aneurysm Detection
 
-This project deploys a SHAP explainer for ResNet-50 as a SageMaker endpoint, provisioned through GitHub Actions and accessible from a Django backend.
+An AI-powered system for detecting brain aneurysms in CT scan images using PyTorch and AWS SageMaker.
 
-## Directory Structure
+## Overview
 
+This project implements a deep learning model that analyzes brain CT scans to detect potential aneurysms. It uses a VGG16-based architecture and can be deployed as a serverless endpoint on AWS SageMaker.
 
-## Cost Optimization
+## Prerequisites
 
-This deployment uses the following strategies to minimize costs:
+- Python 3.9+
+- AWS Account with SageMaker access
+- Docker (for local testing)
+- Required Python packages (see `requirements.txt`)
 
-1. **Instance Type**: Uses `ml.t2.medium` instances which are among the lowest-cost SageMaker instances.
-2. **On-demand Provisioning**: The endpoint is created and destroyed as needed via GitHub Actions.
-3. **Single Instance**: Default configuration uses only one instance.
+## Setup
+
+1. Create and activate virtual environment:
+```sh
+./setup_venv.sh
+```
+
+2. Install dependencies:
+```sh
+pip install -r requirements.txt
+```
+
+3. Setup AWS infrastructure:
+```sh
+./setup_aws_infrastructure.sh
+```
+
+## Project Structure
+
+```
+.
+├── my_model/
+│   ├── model.pth              # Your trained model weights
+│   └── code/
+│       ├── inference.py       # Model inference code
+│       └── requirements.txt   # Inference dependencies
+├── test-local.ipynb          # Local testing notebook
+├── final.ipynb               # Deployment notebook
+├── setup_aws_infrastructure.sh
+├── setup_venv.sh
+├── requirements.txt
+└── Dockerfile
+```
+
+## Model Details
+
+- Architecture: Modified VGG16
+- Input: Brain CT scan images (224x224 RGB)
+- Output: Binary classification (Aneurysm/Non-aneurysm)
+- Framework: PyTorch 2.1.0
 
 ## Deployment
 
-To deploy the SageMaker endpoint:
+1. Package your trained model:
+```sh
+# Ensure your model.pth is in the my_model/ directory
+tar -czf model.tar.gz my_model/
+```
 
-1. Store your AWS credentials as GitHub secrets:
-   - `AWS_ACCESS_KEY_ID`
-   - `AWS_SECRET_ACCESS_KEY`
-   - `AWS_SAGEMAKER_ROLE_ARN` (IAM role with SageMaker permissions)
+2. Open `final.ipynb` in Jupyter and follow the deployment steps.
 
-2. Run the GitHub Actions workflow manually from the Actions tab.
+3. The deployment will create a serverless SageMaker endpoint.
 
-3. After deployment, note the endpoint name from the workflow outputs.
+## Testing
 
-## Django Integration
+1. Local testing:
+   - Use `test-local.ipynb` to verify model functionality
 
-Add this to your Django application to call the endpoint:
+2. Endpoint testing:
+   - Use the provided test functions in `final.ipynb`
+   - Test with sample CT scan images via URLs
+
+## API Usage
 
 ```python
 import boto3
-import base64
-from PIL import Image
-import io
 import json
 
-def call_sagemaker_endpoint(image_path, endpoint_name, region_name='us-east-1'):
-    # Load and prepare the image
-    with open(image_path, 'rb') as f:
-        image_data = f.read()
-    
-    # Encode image data as base64
-    base64_encoded = base64.b64encode(image_data).decode('utf-8')
-    
-    # Create payload
-    payload = json.dumps({'image': base64_encoded})
-    
-    # Call SageMaker endpoint
-    runtime = boto3.client('sagemaker-runtime', region_name=region_name)
+def invoke_endpoint(endpoint_name, image_url):
+    runtime = boto3.client('sagemaker-runtime')
     response = runtime.invoke_endpoint(
         EndpointName=endpoint_name,
         ContentType='application/json',
-        Body=payload
+        Body=json.dumps({"url": image_url})
     )
-    
-    # Parse response
-    result = json.loads(response['Body'].read().decode())
-    return result
+    return json.loads(response['Body'].read().decode())
 ```
+
+## Environment Variables
+
+Required AWS environment variables:
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_DEFAULT_REGION`
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a new Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- VGG16 architecture from torchvision
+- AWS SageMaker team for serverless inference capabilities
+
+## Important Note
+
+Remember to bring your own trained model (`model.pth`). This repository does not include pretrained weights.
