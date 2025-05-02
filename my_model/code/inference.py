@@ -27,29 +27,50 @@ def model_fn(model_dir):
     """Load the PyTorch model with enhanced security features"""
     try:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Loading model from directory: {model_dir}")
+        
+        # Initialize model
         model = CNNModel()
         
-        # Load model using torch.load directly
-        checkpoint = torch.load(
-            os.path.join(model_dir, 'model.pth'),
-            map_location=device
-        )
+        # Load checkpoint
+        model_path = os.path.join(model_dir, 'model.pth')
+        print(f"Loading checkpoint from: {model_path}")
+        
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model file not found at {model_path}")
+            
+        # Load using torch.load
+        checkpoint = torch.load(model_path, map_location=device)
+        print(f"Checkpoint loaded. Keys available: {checkpoint.keys()}")
         
         # Get state dict
         if isinstance(checkpoint, dict):
-            state_dict = checkpoint.get('model_state_dict',
-                        checkpoint.get('state_dict', checkpoint))
+            if 'model_state_dict' in checkpoint:
+                state_dict = checkpoint['model_state_dict']
+            elif 'state_dict' in checkpoint:
+                state_dict = checkpoint['state_dict']
+            else:
+                state_dict = checkpoint
         else:
-            state_dict = checkpoint
+            raise ValueError("Checkpoint is not a dictionary")
             
         # Load state dict
         model.load_state_dict(state_dict, strict=False)
+        print("State dict loaded successfully")
+        
+        # Set to evaluation mode
         model.eval()
-        return model.to(device)
+        model = model.to(device)
+        print(f"Model loaded successfully and moved to {device}")
+        
+        return model
         
     except Exception as e:
-        print(f"Error loading model: {str(e)}")
+        print(f"Error in model_fn: {str(e)}")
+        print(f"Error type: {type(e)}")
+        print(f"Error details: {e.__dict__}")
         raise
+
 
 def input_fn(request_body, content_type="application/json"):
     """Transform input data with enhanced validation."""
@@ -126,62 +147,48 @@ def input_fn(request_body, content_type="application/json"):
         raise
 
 def predict_fn(input_data, model):
-    """Make prediction with enhanced error handling."""
+    """Make prediction with enhanced error handling and SHAP support."""
     print(f"Making prediction at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
-    print(f"User: krooldonutz")
     
     try:
-        # Move to same device as model
         device = next(model.parameters()).device
         input_data = input_data.to(device)
         
-        # Make prediction
         with torch.no_grad():
-            try:
-                output = model(input_data)
-                probabilities = torch.nn.functional.softmax(output, dim=1)
-                
-                # Validate output
-                if torch.isnan(probabilities).any():
-                    raise ValueError("Model produced NaN values")
-                if not torch.allclose(probabilities.sum(dim=1), torch.ones(probabilities.size(0)).to(device)):
-                    raise ValueError("Invalid probability distribution")
-                    
-                return probabilities
-                
-            except RuntimeError as e:
-                if "out of memory" in str(e):
-                    torch.cuda.empty_cache()
-                raise
-                
+            output = model(input_data)
+            probabilities = torch.nn.functional.softmax(output, dim=1)
+            
+            # Calculate SHAP values
+            import shap
+            background = torch.zeros((1, 3, 224, 224)).to(device)
+            explainer = shap.DeepExplainer(model, background)
+            shap_values = explainer.shap_values(input_data)
+            
+            return {
+                'probabilities': probabilities,
+                'shap_values': shap_values
+            }
+            
     except Exception as e:
         print(f"❌ Error during prediction: {str(e)}")
         raise
 
 def output_fn(prediction, accept="application/json"):
-    """Format prediction output with validation."""
-    print(f"Formatting output at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
-    print(f"User: krooldonutz")
-    
+    """Format prediction output with SHAP values."""
     try:
-        if accept != "application/json":
-            raise ValueError(f"Unsupported accept type: {accept}")
-            
-        # Validate prediction
-        if not isinstance(prediction, torch.Tensor):
-            raise ValueError("Invalid prediction type")
-            
-        predictions = prediction.cpu().numpy().tolist()[0]
-        if len(predictions) != 2:
-            raise ValueError("Invalid prediction shape")
-            
-        # Create response
+        if isinstance(prediction, dict):
+            probabilities = prediction['probabilities'].cpu().numpy().tolist()[0]
+            shap_data = [sv.tolist() for sv in prediction['shap_values']]
+        else:
+            probabilities = prediction.cpu().numpy().tolist()[0]
+            shap_data = None
+        
         response = {
-            "prediction": "Aneurysm" if predictions[1] > predictions[0] else "Non-aneurysm",
-            "confidence": float(max(predictions)),
+            "prediction": "Aneurysm" if probabilities[1] > probabilities[0] else "Non-aneurysm",
+            "confidence": float(max(probabilities)),
             "probabilities": {
-                "non_aneurysm": float(predictions[0]),
-                "aneurysm": float(predictions[1])
+                "non_aneurysm": float(probabilities[0]),
+                "aneurysm": float(probabilities[1])
             },
             "metadata": {
                 "timestamp": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
@@ -190,13 +197,8 @@ def output_fn(prediction, accept="application/json"):
             }
         }
         
-        # Validate response
-        if not all(isinstance(v, float) for v in [
-            response["confidence"],
-            response["probabilities"]["non_aneurysm"],
-            response["probabilities"]["aneurysm"]
-        ]):
-            raise ValueError("Invalid probability values")
+        if shap_data:
+            response["shap_values"] = shap_data
             
         return json.dumps(response)
         
